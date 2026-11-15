@@ -1,0 +1,29 @@
+[Unit]
+Description=Mastishq API (Node.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mastishq
+Group=mastishq
+WorkingDirectory=/opt/mastishq/backend
+# secrets live here (root-only file), never in the code folder
+EnvironmentFile=/etc/mastishq/api.env
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+# give in-flight requests time to finish on restart
+TimeoutStopSec=20
+
+# lock the process down
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mastishq
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
