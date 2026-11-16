@@ -5,10 +5,12 @@ const { OAuth2Client } = require("google-auth-library");
 const { User, RefreshToken } = require("../models");
 const { COOKIE, hash, issueRefresh, clearCookie, revokeFamily, revokeAllFor } = require("../lib/session");
 const { sign, auth, wrap } = require("../middleware");
+const { isPro } = require("../lib/billing");
 
 const publicUser = (u) => ({
   id: u._id, name: u.name, firstName: u.firstName, lastName: u.lastName, email: u.email, role: u.role,
   onboarded: u.onboarded, goalName: u.goalName, phone: u.phone,
+  plan: isPro(u) ? "pro" : "free", planExpiresAt: isPro(u) ? u.planExpiresAt : null,
 });
 
 // public config the login page needs (the Google client ID is not a secret)

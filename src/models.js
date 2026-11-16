@@ -27,6 +27,20 @@ const User = model("User", new Schema({
   onboarded: { type: Boolean, default: false },
   resetToken: String,
   resetTokenExpires: Date,
+  plan: { type: String, enum: ["free", "pro"], default: "free" },
+  planExpiresAt: Date,
+}, { timestamps: true }));
+
+// one row per Razorpay order; paymentId is unique so a payment can never be credited twice
+const Payment = model("Payment", new Schema({
+  userId: { type: ObjectId, ref: "User", index: true },
+  orderId: { type: String, unique: true },
+  paymentId: { type: String, unique: true, sparse: true },
+  amount: Number,
+  currency: { type: String, default: "INR" },
+  days: Number,
+  status: { type: String, enum: ["created", "paid", "failed"], default: "created" },
+  paidAt: Date,
 }, { timestamps: true }));
 
 const Goal = model("Goal", new Schema({ name: String, description: String, order: Number }));
@@ -224,7 +238,7 @@ quotaSchema.index({ userId: 1, day: 1 }, { unique: true });
 const AiQuota = model("AiQuota", quotaSchema);
 
 module.exports = {
-  UsageLog, AiQuota,
+  UsageLog, AiQuota, Payment,
   SupportTicket,
   Feedback,
   RefreshToken,

@@ -1,5 +1,6 @@
 // AI usage: cost estimates, per-call logging and the daily limits that keep OpenAI spend under control.
-const { UsageLog, AiQuota } = require("../models");
+const { UsageLog, AiQuota, User } = require("../models");
+const { isPro } = require("./billing");
 
 // ESTIMATED US$ per 1M tokens (input / output). These are approximations: check OpenAI's pricing page and
 // override with the OPENAI_PRICES env var, e.g. {"gpt-4o-mini":[0.15,0.6]}.
@@ -38,12 +39,16 @@ const LIMITS = {
   chat: Number(process.env.AI_LIMIT_CHAT ?? 60),      // AI tutor / Ask why / similar-question messages per day
   search: Number(process.env.AI_LIMIT_SEARCH ?? 15),  // answers that use paid web search per day
 };
+// Pro learners get a higher daily allowance (PRO_LIMIT_MULTIPLIER, default 3x)
+const PRO_MULT = Number(process.env.PRO_LIMIT_MULTIPLIER) || 3;
 const dayKey = (now = Date.now()) => new Date(now + 5.5 * 3600e3).toISOString().slice(0, 10);
 
 // Take one unit. Counts first, then checks, so two requests at once can't both slip past the limit.
 async function consume(user, key, now = Date.now()) {
-  const limit = LIMITS[key];
+  let limit = LIMITS[key];
   if (!limit || user?.role === "admin") return { ok: true, limit };
+  const u = await User.findById(user.id).select("plan planExpiresAt").lean();
+  if (isPro(u, now)) limit = limit * PRO_MULT;
   const where = { userId: user.id, day: dayKey(now) };
   const doc = await AiQuota.findOneAndUpdate(where, { $inc: { [key]: 1 } }, { upsert: true, new: true });
   if (doc[key] > limit) {

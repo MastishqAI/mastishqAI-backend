@@ -24,6 +24,8 @@ app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin: (process.env.CLIENT_URL || "http://localhost:5173,http://localhost:5174").split(","), credentials: true }));
 app.use(cookieParser());
+// Razorpay webhooks are signed over the raw body, so this route must be mounted before express.json()
+app.use("/api/payments/webhook", express.raw({ type: "*/*", limit: "256kb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan(isProd ? "combined" : "dev"));
 
@@ -52,6 +54,7 @@ app.use("/api/mistakes", require("./routes/mistakes"));
 app.use("/api/home", require("./routes/home"));
 app.use("/api/leaderboard", require("./routes/leaderboard"));
 app.use("/api/support", require("./routes/support"));
+app.use("/api/payments", require("./routes/payments"));
 
 app.use((_req, res) => res.status(404).json({ success: false, message: "Route not found" }));
 app.use(errorHandler);
