@@ -5,7 +5,7 @@ const { levelInfo } = require("../lib/xp");
 
 router.use(auth);
 
-const LEVEL_NAMES = ["New here", "Rookie", "Learner", "Achiever", "Scholar", "Expert", "Master", "Champion", "Legend"];
+const LEVEL_NAMES = ["", "Beginner", "Learner", "Achiever", "Scholar", "Specialist", "Master", "Champion", "Legend", "Elite", "King"];
 
 router.get("/", wrap(async (req, res) => {
   const user = await User.findById(req.user.id);
@@ -20,7 +20,7 @@ router.get("/", wrap(async (req, res) => {
     exam: (user.goalName || "").split(" ")[0] || "",
     dailyGoal: user.dailyGoal,
     points: stats.totalXp,
-    level: info.level, levelName: LEVEL_NAMES[info.level] || "Legend",
+    level: info.level, levelName: LEVEL_NAMES[info.level] || "King",
     nextLevel, pct: info.pct, toNext: info.toNext, levelStart: info.start, levelNext: info.next,
     streak: stats.currentStreak,
     badges: stats.badges,

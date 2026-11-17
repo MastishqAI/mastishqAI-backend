@@ -1,6 +1,8 @@
 const router = require("express").Router();
 const { Material } = require("../models");
 const { buildContext } = require("../lib/rag");
+const { syncBadges } = require("../lib/badges");
+const { rewardReferral } = require("../lib/referral");
 const crypto = require("crypto");
 const { Practice, StageAttempt, Mistake, UserStats, User, Notification, Feedback } = require("../models");
 const { auth, wrap } = require("../middleware");
@@ -208,6 +210,12 @@ router.post("/attempts/:attemptId/finish", wrap(async (req, res) => {
     if (a.cleared && a.stage !== "diagnostic")
       await Notification.create({ userId: req.user.id, type: "achievement", title: `${cfg.label} stage cleared`, body: `You cleared ${cfg.label} on "${a.topic}" and earned ${earned} pts.` });
     await a.save();
+    // badges are worked out from real activity (this clear may have earned one)
+    try {
+      const { newly } = await syncBadges(req.user.id);
+      for (const name of newly.filter((n) => n !== "Rookie")) await Notification.create({ userId: req.user.id, type: "achievement", title: `${name} badge earned`, body: `You earned the ${name} badge. See it under Progress → Levels.` });
+    } catch (e) { console.error("badge sync failed:", e.message); }
+    if (a.cleared && a.stage !== "diagnostic") rewardReferral(req.user.id).catch((e) => console.error("referral reward failed:", e.message));
   }
 
   // ---- result summary ----

@@ -7,10 +7,19 @@ const { COOKIE, hash, issueRefresh, clearCookie, revokeFamily, revokeAllFor } = 
 const { sign, auth, wrap } = require("../middleware");
 const { isPro } = require("../lib/billing");
 
+// a valid invite code (never your own) links the new account to whoever invited them
+async function referrerFor(code, email) {
+  const c = String(code || "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{6,12}$/.test(c)) return undefined;
+  const r = await User.findOne({ referralCode: c }).select("_id email");
+  return r && r.email !== String(email || "").toLowerCase() ? r._id : undefined;
+}
+
 const publicUser = (u) => ({
   id: u._id, name: u.name, firstName: u.firstName, lastName: u.lastName, email: u.email, role: u.role,
   onboarded: u.onboarded, goalName: u.goalName, phone: u.phone,
   plan: isPro(u) ? "pro" : "free", planExpiresAt: isPro(u) ? u.planExpiresAt : null,
+  picture: u.picture || null,
 });
 
 // public config the login page needs (the Google client ID is not a secret)
@@ -33,7 +42,7 @@ router.post("/google", wrap(async (req, res) => {
   if (!user) {
     user = await User.create({
       name: p.name || p.email.split("@")[0], firstName: p.given_name, lastName: p.family_name,
-      email: p.email, googleId: p.sub, picture: p.picture, role: "student",
+      email: p.email, googleId: p.sub, picture: p.picture, role: "student", referredBy: await referrerFor(req.body.ref, p.email),
     });
   } else if (!user.googleId) {
     user.googleId = p.sub; user.picture = user.picture || p.picture; await user.save();
@@ -52,7 +61,7 @@ router.post("/register", wrap(async (req, res) => {
   if (await User.findOne({ email: email.toLowerCase() }))
     return res.status(409).json({ success: false, message: "Email already registered" });
   const user = await User.create({
-    name, firstName, lastName, email, phone,
+    name, firstName, lastName, email, phone, referredBy: await referrerFor(req.body.ref, email),
     passwordHash: await bcrypt.hash(password, 12),
     role: "student",                                        // teachers/admins are promoted by the site owner (see src/set-role.js)
     onboarded: false,
@@ -111,6 +120,7 @@ router.get("/me", auth, wrap(async (req, res) => {
 router.post("/change-password", auth, wrap(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const user = await User.findById(req.user.id);
+  if (!user.passwordHash) return res.status(400).json({ success: false, message: "This account signs in with Google, so there is no password to change." });
   if (!(await bcrypt.compare(currentPassword || "", user.passwordHash)))
     return res.status(400).json({ success: false, message: "Current password is wrong" });
   if (!newPassword || newPassword.length < 6)

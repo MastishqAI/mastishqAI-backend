@@ -29,6 +29,12 @@ const User = model("User", new Schema({
   resetTokenExpires: Date,
   plan: { type: String, enum: ["free", "pro"], default: "free" },
   planExpiresAt: Date,
+  country: { type: String, default: "India" },
+  referralCode: { type: String, unique: true, sparse: true },
+  referredBy: { type: ObjectId, ref: "User" },
+  referralRewarded: { type: Boolean, default: false },
+  referralRewardsGiven: { type: Number, default: 0 },
+  bonusChats: { type: Number, default: 0 },
 }, { timestamps: true }));
 
 // one row per Razorpay order; paymentId is unique so a payment can never be credited twice
@@ -77,6 +83,7 @@ const UserStats = model("UserStats", new Schema({
   longestStreak: { type: Number, default: 0 },
   lastActiveDate: String,
   badges: [String],
+  badgeDates: { type: Schema.Types.Mixed, default: {} },
   diagnosticDone: { type: Boolean, default: false },
   answered: { type: Number, default: 0 },
   correct: { type: Number, default: 0 },

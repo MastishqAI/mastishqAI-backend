@@ -1,7 +1,11 @@
 const router = require("express").Router();
-const { UserStats, XpEvent, User } = require("../models");
+const { UserStats, XpEvent, User, StageAttempt } = require("../models");
 const { auth, wrap } = require("../middleware");
-const { awardXp } = require("../lib/xp");
+const { awardXp, levelInfo } = require("../lib/xp");
+const { levelRows, monthGrid, weekBars } = require("../lib/progress");
+const { syncBadges } = require("../lib/badges");
+const { personalBests, recordsByTopic } = require("../lib/bests");
+const { dayKey } = require("../lib/usage");
 
 router.use(auth);
 
@@ -16,6 +20,60 @@ router.get("/stats", wrap(async (req, res) => {
       nextLevelXp, xpToNextLevel: Math.max(0, nextLevelXp - stats.totalXp),
     },
   });
+}));
+
+// Everything the "Points, levels and badges" screen needs in one call.
+router.get("/overview", wrap(async (req, res) => {
+  const stats = (await UserStats.findOne({ userId: req.user.id })) || {};
+  const points = stats.totalXp || 0;
+  const info = levelInfo(points);
+  const { badges } = await syncBadges(req.user.id);
+
+  const today = dayKey();
+  const since = new Date(Date.now() - 10 * 864e5);
+  const recent = await XpEvent.find({ userId: req.user.id, createdAt: { $gte: since } }).select("createdAt xp").lean();
+  const byDay = {};
+  recent.forEach((e) => { const k = dayKey(e.createdAt.getTime()); byDay[k] = (byDay[k] || 0) + (e.xp || 0); });
+  const week = weekBars(today, byDay);
+  const earned = badges.filter((b) => b.met);
+  const next = badges.find((b) => !b.met);
+
+  res.json({
+    success: true,
+    level: { n: info.level, points, next: info.next, toNext: info.toNext, pct: info.next ? Math.round((points / info.next) * 100) : 100 },
+    totalXp: points,
+    weekXp: week.reduce((s, d) => s + d.xp, 0),
+    streak: { current: stats.currentStreak || 0, best: Math.max(stats.longestStreak || 0, stats.currentStreak || 0), todayDone: (stats.lastActiveDate || "") === new Date().toISOString().slice(0, 10) },
+    badgeSummary: { earned: earned.length, total: badges.length, next: next?.name || null, nextPct: next ? next.pct : 100 },
+    badges,
+    levels: levelRows(points),
+    week,
+  });
+}));
+
+// "My best": records from the learner's own finished stages
+router.get("/bests", wrap(async (req, res) => {
+  const stats = (await UserStats.findOne({ userId: req.user.id }).lean()) || {};
+  const rows = await StageAttempt.find({ userId: req.user.id, status: "submitted", stage: { $ne: "diagnostic" } })
+    .select("stage topic subject score maxScore timeSec updatedAt createdAt questions.text").lean();
+  const attempts = rows.map((a) => ({ ...a, questionCount: a.questions?.length || 0 }));
+  res.json({ success: true, ...personalBests(attempts, stats), topics: recordsByTopic(attempts, dayKey().slice(0, 7)), hasData: attempts.length > 0 });
+}));
+
+// ?month=YYYY-MM (India time), defaults to this month
+router.get("/heatmap", wrap(async (req, res) => {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(req.query.month || ""));
+  const today = dayKey();
+  const year = m ? Number(m[1]) : Number(today.slice(0, 4));
+  const month = m ? Number(m[2]) : Number(today.slice(5, 7));
+  if (month < 1 || month > 12) return res.status(400).json({ success: false, message: "Invalid month" });
+  // fetch a day either side so India-time days at the month edges are complete
+  const from = new Date(Date.UTC(year, month - 1, 1) - 36 * 3600e3);
+  const to = new Date(Date.UTC(year, month, 1) + 36 * 3600e3);
+  const events = await XpEvent.find({ userId: req.user.id, createdAt: { $gte: from, $lt: to } }).select("createdAt xp").lean();
+  const byDay = {};
+  events.forEach((e) => { const k = dayKey(e.createdAt.getTime()); byDay[k] = (byDay[k] || 0) + (e.xp || 0); });
+  res.json({ success: true, month: `${year}-${String(month).padStart(2, "0")}`, label: new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", { month: "long", timeZone: "UTC" }), weeks: monthGrid(year, month, byDay), today });
 }));
 
 router.get("/history", wrap(async (req, res) => {

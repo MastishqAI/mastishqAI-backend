@@ -56,6 +56,7 @@ app.use("/api/leaderboard", require("./routes/leaderboard"));
 app.use("/api/support", require("./routes/support"));
 app.use("/api/payments", require("./routes/payments"));
 app.use("/api/materials", require("./routes/materials"));
+app.use("/api/profile", require("./routes/profile"));
 
 app.use((_req, res) => res.status(404).json({ success: false, message: "Route not found" }));
 app.use(errorHandler);

@@ -55,6 +55,10 @@ async function consume(user, key, now = Date.now()) {
   const doc = await AiQuota.findOneAndUpdate(where, { $inc: { [key]: 1 } }, { upsert: true, new: true });
   if (doc[key] > limit) {
     await AiQuota.updateOne(where, { $inc: { [key]: -1 } });
+    if (key === "chat") {                       // bonus chats from inviting friends
+      const b = await User.findOneAndUpdate({ _id: user.id, bonusChats: { $gt: 0 } }, { $inc: { bonusChats: -1 } });
+      if (b) return { ok: true, limit, used: limit, bonus: true };
+    }
     return { ok: false, limit, used: limit };
   }
   return { ok: true, limit, used: doc[key] };
@@ -65,4 +69,4 @@ const refund = (user, key) => (LIMITS[key] && user?.role !== "admin" ? AiQuota.u
 const WHAT = { quiz: ["AI quiz", "AI quizzes"], chat: ["AI message", "AI messages"], search: ["answer with web sources", "answers with web sources"], upload: ["file or scan", "files and scans"] };
 const limitMessage = (key, limit) => `You've used today's limit of ${limit} ${WHAT[key][limit === 1 ? 0 : 1]}. It resets at midnight (India time).`;
 
-module.exports = { PRICES, LIMITS, estimateCost, tokensOf, record, dayKey, consume, refund, limitMessage };
+module.exports = { PRICES, LIMITS, PRO_MULT, estimateCost, tokensOf, record, dayKey, consume, refund, limitMessage };

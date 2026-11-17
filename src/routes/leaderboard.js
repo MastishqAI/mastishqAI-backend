@@ -2,6 +2,7 @@ const router = require("express").Router();
 const { UserStats, XpEvent, User } = require("../models");
 const { auth, wrap } = require("../middleware");
 const { levelInfo } = require("../lib/xp");
+const { neighbours, shortName } = require("../lib/bests");
 
 router.use(auth);
 
@@ -54,6 +55,19 @@ router.get("/", wrap(async (req, res) => {
     success: true, scope: { all: !goal, goalName: goal, label: goal ? (LABELS[goal] || goal) : "All" }, total: all.length, hasMore: offset + limit < pool.length, items, me, movedUp,
     nextTarget: ahead ? { name: ahead.name, rank: ahead.rank, diff: ahead.points - me.points + 1 } : null,
   });
+}));
+
+// A small window around the current learner (two above, one below). Other learners show as "First L." only.
+router.get("/around", wrap(async (req, res) => {
+  const mine = await User.findById(req.user.id).select("goalName");
+  const goal = mine?.goalName && mine.goalName !== "Other Exams" ? mine.goalName : null;
+  const all = await board(goal);
+  const meIdx = all.findIndex((r) => r.id === req.user.id);
+  const rows = neighbours(all, meIdx).map((r) => ({
+    rank: r.rank, me: r.id === req.user.id, name: r.id === req.user.id ? "You" : shortName(r.name),
+    initial: (r.id === req.user.id ? "Y" : shortName(r.name)[0] || "?").toUpperCase(), level: r.level, points: r.points,
+  }));
+  res.json({ success: true, scope: { all: !goal, label: goal ? (LABELS[goal] || goal) : "All" }, total: all.length, rows });
 }));
 
 module.exports = router;
