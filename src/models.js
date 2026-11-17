@@ -134,6 +134,7 @@ const Practice = model("Practice", new Schema({
   type: { type: String, default: "practice" }, // practice | diagnostic
   topic: String, description: String, subject: String,
   secondsPerQuestion: { type: Number, default: 60 },
+  materialIds: [{ type: ObjectId, ref: "Material" }],
   stages: {
     easy: { ...stageState, status: { type: String, default: "open" } },
     medium: stageState,
@@ -237,8 +238,25 @@ const quotaSchema = new Schema({
 quotaSchema.index({ userId: 1, day: 1 }, { unique: true });
 const AiQuota = model("AiQuota", quotaSchema);
 
+// ---- learner-uploaded study material (RAG): the file lives in S3 / local storage, its text is split into chunks ----
+const NINETY_DAYS = 90 * 24 * 3600;
+const Material = model("Material", new Schema({
+  userId: { type: ObjectId, ref: "User", index: true },
+  name: String, mime: String, size: Number,
+  storage: String, storageKey: String,
+  pages: Number, chars: Number,
+  createdAt: { type: Date, default: Date.now, expires: NINETY_DAYS },
+}));
+const Chunk = model("Chunk", new Schema({
+  materialId: { type: ObjectId, ref: "Material", index: true },
+  userId: { type: ObjectId, index: true },
+  order: Number, text: String,
+  embedding: { type: [Number], default: undefined },
+  createdAt: { type: Date, default: Date.now, expires: NINETY_DAYS },
+}));
+
 module.exports = {
-  UsageLog, AiQuota, Payment,
+  UsageLog, AiQuota, Payment, Material, Chunk,
   SupportTicket,
   Feedback,
   RefreshToken,

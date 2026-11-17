@@ -10,6 +10,7 @@ const PRICES = {
   "gpt-4.1": [2, 8],
   "gpt-4.1-mini": [0.4, 1.6],
   "gpt-4.1-nano": [0.1, 0.4],
+  "text-embedding-3-small": [0.02, 0],
   ...(() => { try { return JSON.parse(process.env.OPENAI_PRICES || "{}"); } catch { return {}; } })(),
 };
 const SEARCH_USD = Number(process.env.OPENAI_SEARCH_USD) || 0.025;   // per web search (approx.)
@@ -38,6 +39,7 @@ const LIMITS = {
   quiz: Number(process.env.AI_LIMIT_QUIZ ?? 20),      // quizzes / diagnostics generated per day
   chat: Number(process.env.AI_LIMIT_CHAT ?? 60),      // AI tutor / Ask why / similar-question messages per day
   search: Number(process.env.AI_LIMIT_SEARCH ?? 15),  // answers that use paid web search per day
+  upload: Number(process.env.AI_LIMIT_UPLOAD ?? 10),  // study files / scans read per day (each is an OpenAI read)
 };
 // Pro learners get a higher daily allowance (PRO_LIMIT_MULTIPLIER, default 3x)
 const PRO_MULT = Number(process.env.PRO_LIMIT_MULTIPLIER) || 3;
@@ -60,7 +62,7 @@ async function consume(user, key, now = Date.now()) {
 // give a unit back (for example when generation failed and the learner got nothing)
 const refund = (user, key) => (LIMITS[key] && user?.role !== "admin" ? AiQuota.updateOne({ userId: user.id, day: dayKey() }, { $inc: { [key]: -1 } }).catch(() => {}) : Promise.resolve());
 
-const WHAT = { quiz: ["AI quiz", "AI quizzes"], chat: ["AI message", "AI messages"], search: ["answer with web sources", "answers with web sources"] };
+const WHAT = { quiz: ["AI quiz", "AI quizzes"], chat: ["AI message", "AI messages"], search: ["answer with web sources", "answers with web sources"], upload: ["file or scan", "files and scans"] };
 const limitMessage = (key, limit) => `You've used today's limit of ${limit} ${WHAT[key][limit === 1 ? 0 : 1]}. It resets at midnight (India time).`;
 
 module.exports = { PRICES, LIMITS, estimateCost, tokensOf, record, dayKey, consume, refund, limitMessage };

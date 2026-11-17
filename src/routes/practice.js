@@ -1,4 +1,6 @@
 const router = require("express").Router();
+const { Material } = require("../models");
+const { buildContext } = require("../lib/rag");
 const crypto = require("crypto");
 const { Practice, StageAttempt, Mistake, UserStats, User, Notification, Feedback } = require("../models");
 const { auth, wrap } = require("../middleware");
@@ -24,7 +26,7 @@ const mkKey = (text) => crypto.createHash("md5").update(text.trim().toLowerCase(
 
 const practiceView = (p) => ({
   id: p._id, type: p.type, topic: p.topic, description: p.description, subject: p.subject,
-  secondsPerQuestion: p.secondsPerQuestion, stages: p.stages, createdAt: p.createdAt,
+  secondsPerQuestion: p.secondsPerQuestion, stages: p.stages, createdAt: p.createdAt, materialCount: p.materialIds?.length || 0,
 });
 
 function attemptView(a, { reveal = false } = {}) {
@@ -49,10 +51,14 @@ function attemptView(a, { reveal = false } = {}) {
 
 // ---- create a topic practice (3 stages) ----
 router.post("/", wrap(async (req, res) => {
-  const topic = (req.body.topic || "").trim();
+  let topic = (req.body.topic || "").trim();
+  const ids = (Array.isArray(req.body.materialIds) ? req.body.materialIds : []).slice(0, 5);
+  const mats = ids.length ? await Material.find({ _id: { $in: ids }, userId: req.user.id }).select("name").lean() : [];
+  if (ids.length && mats.length !== new Set(ids.map(String)).size) return res.status(400).json({ success: false, message: "One of the files is no longer available. Please add it again." });
+  if (!topic && mats.length) topic = mats[0].name.replace(/\.[^.]+$/, "").slice(0, 80);
   if (!topic) return res.status(400).json({ success: false, message: "Topic name is required" });
   const p = await Practice.create({
-    userId: req.user.id, topic, description: (req.body.description || "").trim(),
+    userId: req.user.id, topic, description: (req.body.description || "").trim(), materialIds: mats.map((m) => m._id),
     secondsPerQuestion: Math.min(Math.max(parseInt(req.body.secondsPerQuestion, 10) || 60, 20), 180),
   });
   res.status(201).json({ success: true, practice: practiceView(p) });
@@ -90,13 +96,20 @@ router.post("/:id/stages/:stage/start", wrap(async (req, res) => {
   const resume = await StageAttempt.findOne({ practiceId: p._id, stage: req.params.stage, status: "in_progress" });
   if (resume) return res.json({ success: true, attempt: attemptView(resume) });
 
+  const meter = { userId: req.user.id, feature: "quiz" };
+  let material = "";
+  if (p.materialIds?.length) {
+    const ctx = await buildContext({ userId: req.user.id, materialIds: p.materialIds, query: `${p.topic}\n${p.description || ""}`, meter });
+    if (!ctx) return res.status(409).json({ success: false, message: "Your uploaded files are no longer available. Please upload them again and start a new practice." });
+    material = ctx.text;
+  }
   if (!(await takeUnit(req, res, "quiz"))) return;
   const user = await User.findById(req.user.id).select("goalName");
   const prior = await StageAttempt.find({ practiceId: p._id }).select("questions.text").limit(5).lean();
   const avoid = prior.flatMap((a) => a.questions.map((q) => q.text));
   const gen = await generateQuestions({
     topic: p.topic, description: p.description, difficulty: req.params.stage,
-    count: cfg.q, exam: user?.goalName || "", avoid, meter: { userId: req.user.id, feature: "quiz" },
+    count: cfg.q, exam: user?.goalName || "", avoid, meter, material,
   });
   if (!gen.questions.length) await refund(req.user, "quiz");
   if (!gen.questions.length) return res.status(502).json({ success: false, message: "We couldn't generate a reliable quiz just now. Please try again in a moment." });
@@ -105,7 +118,7 @@ router.post("/:id/stages/:stage/start", wrap(async (req, res) => {
     userId: req.user.id, practiceId: p._id, stage: req.params.stage, attemptNo: st.attempts + 1,
     topic: p.topic, subject: p.subject, pointsEach: cfg.pts, passMark: passMarkFor(gen.questions.length, cfg.pts),
     secondsPerQuestion: p.secondsPerQuestion,
-    questions: gen.questions.map((q) => ({ ...q, source: "AI generated" })),
+    questions: gen.questions.map((q) => ({ ...q, source: material ? "From your material" : "AI generated" })),
   });
   await p.save();
   res.status(201).json({ success: true, attempt: attemptView(attempt), aiGenerated: gen.ai });
@@ -298,8 +311,14 @@ router.post("/attempts/:attemptId/questions/:qid/ask", wrap(async (req, res) => 
   if (webSearch) { const u = await consume(req.user, "search"); if (!u.ok) { webSearch = false; sourcesLimited = true; } }
   const topic = q.subtopic || a.topic;
   const pastMistakes = await Mistake.countDocuments({ userId: req.user.id, topic });
+  // if this quiz came from the learner's own files, let the tutor read the relevant part too
+  let material = "";
+  try {
+    const prac = await Practice.findById(a.practiceId).select("materialIds").lean();
+    if (prac?.materialIds?.length) material = (await buildContext({ userId: req.user.id, materialIds: prac.materialIds, query: `${q.text} ${message}`, meter: { userId: req.user.id, feature: "ask_why" }, maxChars: 7000 }))?.text || "";
+  } catch (e) { console.warn("ask: material lookup failed:", e.message); }
   const { reply, sources } = await askAboutQuestion({
-    ctx: { question: q.text, options: q.options, correct: q.options[q.correctIndex], yours: q.selectedIndex >= 0 ? q.options[q.selectedIndex] : "", topic, pastMistakes, explanation: q.explanation },
+    ctx: { question: q.text, options: q.options, correct: q.options[q.correctIndex], yours: q.selectedIndex >= 0 ? q.options[q.selectedIndex] : "", topic, pastMistakes, explanation: q.explanation, material },
     history: Array.isArray(req.body.history) ? req.body.history : [], message,
     webSearch, meter: { userId: req.user.id, feature: "ask_why" },
   });
