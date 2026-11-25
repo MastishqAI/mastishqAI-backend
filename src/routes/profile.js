@@ -4,6 +4,7 @@ const models = require("../models");
 const { User, Payment, Material, UserStats, XpEvent, StageAttempt, Practice, Mistake, Conversation, Notification, SupportTicket } = models;
 const { auth, wrap } = require("../middleware");
 const { cleanProfile, planInfo, newReferralCode, scrub } = require("../lib/profile");
+const { lookupPincode } = require("../lib/pincode");
 const { sniff } = require("../lib/material");
 const { LIMITS, PRO_MULT } = require("../lib/usage");
 const { BONUS } = require("../lib/referral");
@@ -46,6 +47,13 @@ router.patch("/", wrap(async (req, res) => {
   const { values, error } = cleanProfile(req.body);
   if (error) return res.status(400).json({ success: false, message: error });
   if (!Object.keys(values).length) return res.status(400).json({ success: false, message: "Nothing to update" });
+  // City, state and country can't be typed in: they come from the pincode
+  if (values.pincode !== undefined) {
+    if (!values.pincode) return res.status(400).json({ success: false, message: "Pincode must be 6 digits." });
+    const { place, error: pinErr } = await lookupPincode(values.pincode);
+    if (pinErr) return res.status(400).json({ success: false, message: pinErr });
+    Object.assign(values, place);
+  }
   const user = await User.findByIdAndUpdate(req.user.id, { $set: values }, { new: true });
   res.json({ success: true, profile: await view(user) });
 }));

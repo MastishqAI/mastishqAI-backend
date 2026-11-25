@@ -57,8 +57,8 @@ router.post("/", wrap(async (req, res) => {
   const ids = (Array.isArray(req.body.materialIds) ? req.body.materialIds : []).slice(0, 5);
   const mats = ids.length ? await Material.find({ _id: { $in: ids }, userId: req.user.id }).select("name").lean() : [];
   if (ids.length && mats.length !== new Set(ids.map(String)).size) return res.status(400).json({ success: false, message: "One of the files is no longer available. Please add it again." });
-  if (!topic && mats.length) topic = mats[0].name.replace(/\.[^.]+$/, "").slice(0, 80);
   if (!topic) return res.status(400).json({ success: false, message: "Topic name is required" });
+  if (!(req.body.description || "").trim()) return res.status(400).json({ success: false, message: "Description is required" });
   const p = await Practice.create({
     userId: req.user.id, topic, description: (req.body.description || "").trim(), materialIds: mats.map((m) => m._id),
     secondsPerQuestion: Math.min(Math.max(parseInt(req.body.secondsPerQuestion, 10) || 60, 20), 180),

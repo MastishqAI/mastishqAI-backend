@@ -3,16 +3,13 @@ const crypto = require("crypto");
 
 const FIELDS = {
   name: (v) => (v.length >= 2 && v.length <= 80 ? v : null),
-  phone: (v) => (v === "" || /^\+?[0-9][0-9 ()-]{6,18}$/.test(v) ? v : null),
+  phone: (v) => (v === "" || /^\+\d{1,4} \d{10}$/.test(v) ? v : null),   // country code + exactly 10 digits
   className: (v) => (v.length <= 60 ? v : null),
   school: (v) => (v.length <= 120 ? v : null),
-  district: (v) => (v.length <= 60 ? v : null),
-  state: (v) => (v.length <= 60 ? v : null),
   pincode: (v) => (v === "" || /^\d{6}$/.test(v) ? v : null),
-  country: (v) => (v.length >= 2 && v.length <= 60 ? v : null),
 };
 const LABEL = { name: "Name", phone: "Mobile number", className: "Class", school: "School name", district: "City", state: "State", pincode: "Pincode", country: "Country" };
-const HINT = { name: "Name must be 2 to 80 characters.", phone: "Enter a valid mobile number, for example +91 9876543210.", pincode: "Pincode must be 6 digits.", country: "Country must be 2 to 60 characters." };
+const HINT = { name: "Name must be 2 to 80 characters.", phone: "Enter a 10-digit mobile number with a country code, for example +91 9876543210.", pincode: "Pincode must be 6 digits.", country: "Country must be 2 to 60 characters." };
 
 // Checks only the fields that were sent. Returns { values } or { error }.
 function cleanProfile(body = {}) {

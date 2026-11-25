@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const { User, Goal } = require("../models");
 const { auth, wrap } = require("../middleware");
+const { lookupPincode } = require("../lib/pincode");
 
 const SUBJECTS = [
   "Mathematics", "Physics", "Chemistry", "Biology", "English", "Hindi",
@@ -18,16 +19,30 @@ router.get("/goals", wrap(async (_req, res) => {
 
 router.get("/subjects", wrap(async (_req, res) => res.json({ success: true, subjects: SUBJECTS })));
 
+// City / state / country come from the pincode (India Post), never typed by the learner
+router.get("/pincode/:pin", wrap(async (req, res) => {
+  const { place, error } = await lookupPincode(String(req.params.pin || ""));
+  if (error) return res.status(400).json({ success: false, message: error });
+  res.json({ success: true, ...place });
+}));
+
 // Step 2 — academic details
 router.post("/academic", wrap(async (req, res) => {
-  const { school, className, district, state, pincode } = req.body;
-  await User.findByIdAndUpdate(req.user.id, { school, className, district, state, pincode });
+  const school = String(req.body.school || "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const className = String(req.body.className || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  const pincode = String(req.body.pincode || "").trim();
+  if (!school || !className) return res.status(400).json({ success: false, message: "Please fill in your school and course." });
+  const { place, error } = await lookupPincode(pincode);
+  if (error) return res.status(400).json({ success: false, message: error });
+  await User.findByIdAndUpdate(req.user.id, { school, className, pincode, district: place.district, state: place.state, country: place.country });
   res.json({ success: true });
 }));
 
 // Step 3 — goals
 router.post("/goals", wrap(async (req, res) => {
   const { goalName, goalText, dailyGoal } = req.body;
+  if (!String(goalName || "").trim() || !String(goalText || "").trim() || !(parseInt(dailyGoal, 10) >= 1))
+    return res.status(400).json({ success: false, message: "Please fill in your goal, a suggestion and your daily question count." });
   await User.findByIdAndUpdate(req.user.id, {
     goalName, goalText, dailyGoal: Math.min(Math.max(parseInt(dailyGoal, 10) || 10, 1), 200),
   });
