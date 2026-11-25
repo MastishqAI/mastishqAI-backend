@@ -69,4 +69,14 @@ const refund = (user, key) => (LIMITS[key] && user?.role !== "admin" ? AiQuota.u
 const WHAT = { quiz: ["AI quiz", "AI quizzes"], chat: ["AI message", "AI messages"], search: ["answer with web sources", "answers with web sources"], upload: ["file or scan", "files and scans"] };
 const limitMessage = (key, limit) => `You've used today's limit of ${limit} ${WHAT[key][limit === 1 ? 0 : 1]}. It resets at midnight (India time).`;
 
-module.exports = { PRICES, LIMITS, PRO_MULT, estimateCost, tokensOf, record, dayKey, consume, refund, limitMessage };
+// What the learner has used today against their limits (the "Usage" box in Ask AI)
+async function snapshot(user) {
+  const u = await User.findById(user.id).select("plan planExpiresAt bonusChats role").lean();
+  const pro = isPro(u);
+  const mult = pro ? PRO_MULT : 1;
+  const doc = (await AiQuota.findOne({ userId: user.id, day: dayKey() }).lean()) || {};
+  const row = (k) => ({ used: Math.min(doc[k] || 0, LIMITS[k] * mult), limit: LIMITS[k] ? LIMITS[k] * mult : null });
+  return { pro, quiz: row("quiz"), chat: row("chat"), upload: row("upload"), bonusChats: u?.bonusChats || 0, unlimited: u?.role === "admin" };
+}
+
+module.exports = { snapshot, PRICES, LIMITS, PRO_MULT, estimateCost, tokensOf, record, dayKey, consume, refund, limitMessage };

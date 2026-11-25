@@ -1,5 +1,7 @@
 const router = require("express").Router();
-const { User, UserStats, StageAttempt, XpEvent } = require("../models");
+const { User, UserStats, StageAttempt, XpEvent, Mistake } = require("../models");
+const { dayKey } = require("../lib/usage");
+const { weekBars } = require("../lib/progress");
 const { auth, wrap } = require("../middleware");
 const { levelInfo } = require("../lib/xp");
 
@@ -28,6 +30,34 @@ router.get("/", wrap(async (req, res) => {
     diagnosticDone: !!stats.diagnosticDone,
     clearedEasy: !!clearedEasy,
     streak3: stats.currentStreak >= 3,
+  });
+}));
+
+// Everything the new Today screen needs: where to resume, mistakes waiting, this week's streak dots, syllabus strength
+const STAGE_LABEL = { easy: "Easy", medium: "Medium", hard: "Hard", diagnostic: "Diagnostic" };
+router.get("/today", wrap(async (req, res) => {
+  const uid = req.user.id;
+  const [resume, mistakesOpen, events, graded] = await Promise.all([
+    StageAttempt.findOne({ userId: uid, status: "in_progress" }).sort("-updatedAt").select("topic stage questions.selectedIndex").lean(),
+    Mistake.countDocuments({ userId: uid, status: { $ne: "fixed" } }),
+    XpEvent.find({ userId: uid, createdAt: { $gte: new Date(Date.now() - 9 * 864e5) } }).select("createdAt xp").lean(),
+    StageAttempt.find({ userId: uid, status: "submitted", stage: { $ne: "diagnostic" } }).sort("-updatedAt").limit(60).select("topic score maxScore").lean(),
+  ]);
+  const byDay = {};
+  events.forEach((e) => { const k = dayKey(e.createdAt.getTime()); byDay[k] = (byDay[k] || 0) + 1; });
+  const today = dayKey();
+  const week = weekBars(today, byDay).map((d) => ({ label: d.label, done: d.xp > 0, today: d.date === today, future: d.future }));
+
+  const topics = new Map();                       // newest first, so the first time a topic appears is its latest
+  graded.forEach((a) => { const k = String(a.topic || "").trim(); if (k && a.maxScore > 0 && !topics.has(k)) topics.set(k, []); if (k && a.maxScore > 0) topics.get(k).push(a.score / a.maxScore); });
+  const syllabus = [...topics.entries()].slice(0, 5).map(([topic, list]) => {
+    const pct = Math.round((list.reduce((x, y) => x + y, 0) / list.length) * 100);
+    return { topic, pct, band: pct >= 75 ? "Strong" : pct >= 50 ? "Building" : "Weak" };
+  });
+  res.json({
+    success: true,
+    resume: resume && { attemptId: resume._id, topic: resume.topic, stage: resume.stage, stageLabel: STAGE_LABEL[resume.stage] || resume.stage, answered: resume.questions.filter((q) => q.selectedIndex !== null && q.selectedIndex !== undefined && q.selectedIndex !== -1).length, total: resume.questions.length },
+    mistakesOpen, week, syllabus,
   });
 }));
 

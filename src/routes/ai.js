@@ -1,9 +1,10 @@
 const router = require("express").Router();
-const { Conversation, Quiz } = require("../models");
+const { Conversation, Quiz, Material } = require("../models");
+const { buildContext } = require("../lib/rag");
 const { auth, wrap } = require("../middleware");
 const { generateQuiz, tutorReply, aiEnabled } = require("../lib/ai");
 const { awardXp } = require("../lib/xp");
-const { consume, refund, limitMessage } = require("../lib/usage");
+const { consume, refund, limitMessage, snapshot } = require("../lib/usage");
 
 async function takeUnit(req, res, key) {
   const u = await consume(req.user, key);
@@ -12,6 +13,8 @@ async function takeUnit(req, res, key) {
 }
 
 router.use(auth);
+
+router.get("/usage", wrap(async (req, res) => res.json({ success: true, usage: await snapshot(req.user) })));
 
 router.get("/status", (_req, res) => res.json({ success: true, aiEnabled: aiEnabled() }));
 
@@ -34,7 +37,14 @@ router.get("/conversations", wrap(async (req, res) => {
 router.get("/conversations/:id", wrap(async (req, res) => {
   const c = await Conversation.findOne({ _id: req.params.id, userId: req.user.id });
   if (!c) return res.status(404).json({ success: false, message: "Conversation not found" });
-  res.json({ success: true, conversation: c });
+  const files = c.materialIds?.length ? await Material.find({ _id: { $in: c.materialIds }, userId: req.user.id }).select("name").lean() : [];
+  res.json({ success: true, conversation: c, files: files.map((f) => ({ id: f._id, name: f.name })) });
+}));
+
+// stop using an attached file in this chat (the file itself stays in the learner's files)
+router.delete("/conversations/:id/materials/:mid", wrap(async (req, res) => {
+  await Conversation.updateOne({ _id: req.params.id, userId: req.user.id }, { $pull: { materialIds: req.params.mid } });
+  res.json({ success: true });
 }));
 
 // send a message; creates the conversation if no id is given
@@ -49,9 +59,22 @@ router.post("/chat", wrap(async (req, res) => {
   if (conversationId && !convo) return res.status(404).json({ success: false, message: "Conversation not found" });
   if (!convo) convo = new Conversation({ userId: req.user.id, title: message.slice(0, 60), messages: [] });
 
+  // files attached in the chat: only the learner's own, at most 5 per chat
+  const asked = (Array.isArray(req.body.materialIds) ? req.body.materialIds : []).map(String).slice(0, 5);
+  if (asked.length) {
+    const own = await Material.find({ _id: { $in: asked }, userId: req.user.id }).select("_id").lean();
+    const ids = new Set([...(convo.materialIds || []).map(String), ...own.map((m) => String(m._id))]);
+    if (ids.size > 5) return res.status(400).json({ success: false, message: "You can attach up to 5 files to one chat." });
+    convo.materialIds = [...ids];
+  }
   if (!(await takeUnit(req, res, "chat"))) return;
+  let material = "";
+  if (convo.materialIds?.length) {
+    try { material = (await buildContext({ userId: req.user.id, materialIds: convo.materialIds, query: message, meter: { userId: req.user.id, feature: "tutor" }, maxChars: 12000 }))?.text || ""; }
+    catch (e) { console.warn("chat: material lookup failed:", e.message); }
+  }
   convo.messages.push({ role: "user", content: message });
-  const reply = await tutorReply(convo.messages.slice(-20), { userId: req.user.id, feature: "tutor" });
+  const reply = await tutorReply(convo.messages.slice(-20), { userId: req.user.id, feature: "tutor" }, material);
   convo.messages.push({ role: "assistant", content: reply });
   await convo.save();
   await awardXp(req.user.id, "ai_chat", 2);

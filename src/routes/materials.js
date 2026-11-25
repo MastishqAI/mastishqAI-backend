@@ -6,7 +6,7 @@ const { Material, Chunk } = require("../models");
 const { auth, wrap } = require("../middleware");
 const { consume, refund, limitMessage } = require("../lib/usage");
 const { chunkText, clean, sniff, looksLikeRefusal } = require("../lib/material");
-const { transcribeImage, transcribePdf, aiEnabled } = require("../lib/ai");
+const { transcribeImage, transcribePdf, analyzeMaterial, aiEnabled } = require("../lib/ai");
 const storage = require("../lib/storage");
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -36,7 +36,7 @@ async function readFile(buf, kind, filename, meter) {
 
 router.use(auth);
 
-const view = (m) => ({ id: m._id, name: m.name, mime: m.mime, size: m.size, pages: m.pages, chars: m.chars, createdAt: m.createdAt });
+const view = (m) => ({ id: m._id, name: m.name, mime: m.mime, size: m.size, pages: m.pages, chars: m.chars, topics: m.topics || [], summary: m.summary || "", createdAt: m.createdAt });
 
 router.get("/", wrap(async (req, res) => {
   const list = await Material.find({ userId: req.user.id }).sort("-createdAt").limit(MAX_FILES_PER_USER).lean();
@@ -65,9 +65,10 @@ router.post("/", (req, res, next) => upload.single("file")(req, res, (err) => {
   const pieces = chunkText(read.text);
   if (read.text.length < 40 || !pieces.length || looksLikeRefusal(read.text)) { await refund(req.user, "upload"); return res.status(422).json({ success: false, message: "We couldn't find readable text in that file. Try a clearer photo or a PDF with selectable text." }); }
 
+  const overview = await analyzeMaterial(read.text, { userId: req.user.id, feature: "upload" });
   const id = crypto.randomBytes(8).toString("hex");
   const saved = await storage.put(`materials/${req.user.id}/${id}${kind.ext}`, f.buffer, kind.mime);
-  const m = await Material.create({ userId: req.user.id, name, mime: kind.mime, size: f.size, storage: saved.storage, storageKey: saved.key, pages: read.pages, chars: read.text.length });
+  const m = await Material.create({ userId: req.user.id, name, mime: kind.mime, size: f.size, storage: saved.storage, storageKey: saved.key, pages: read.pages, chars: read.text.length, topics: overview.topics, summary: overview.summary });
   await Chunk.insertMany(pieces.map((text, order) => ({ materialId: m._id, userId: req.user.id, order, text })));
   res.status(201).json({ success: true, material: view(m) });
 }));

@@ -63,11 +63,24 @@ router.get("/around", wrap(async (req, res) => {
   const goal = mine?.goalName && mine.goalName !== "Other Exams" ? mine.goalName : null;
   const all = await board(goal);
   const meIdx = all.findIndex((r) => r.id === req.user.id);
-  const rows = neighbours(all, meIdx).map((r) => ({
+  // ?top=3 also returns the first three places (the Home screen shows the podium, then a gap, then you)
+  const top = Math.min(Math.max(parseInt(req.query.top, 10) || 0, 0), 5);
+  const near = neighbours(all, meIdx);
+  const picked = top ? [...all.slice(0, top).filter((r) => !near.some((n) => n.id === r.id)), ...near] : near;
+  const gapAfter = top ? all.slice(0, top).filter((r) => !near.some((n) => n.id === r.id)).length : 0;
+  const rows = picked.map((r) => ({
     rank: r.rank, me: r.id === req.user.id, name: r.id === req.user.id ? "You" : shortName(r.name),
     initial: (r.id === req.user.id ? "Y" : shortName(r.name)[0] || "?").toUpperCase(), level: r.level, points: r.points,
   }));
-  res.json({ success: true, scope: { all: !goal, label: goal ? (LABELS[goal] || goal) : "All" }, total: all.length, rows });
+  // places gained this week: rank now vs rank without this week's points
+  let movedUp = 0;
+  const me = meIdx >= 0 ? all[meIdx] : null;
+  if (me) {
+    const recent = await XpEvent.aggregate([{ $match: { createdAt: { $gte: new Date(Date.now() - 7 * 864e5) } } }, { $group: { _id: "$userId", xp: { $sum: "$xp" } } }]);
+    const wk = Object.fromEntries(recent.map((r) => [String(r._id), r.xp]));
+    movedUp = 1 + all.filter((r) => r.id !== me.id && r.points - (wk[r.id] || 0) > me.points - (wk[me.id] || 0)).length - me.rank;
+  }
+  res.json({ success: true, scope: { all: !goal, label: goal ? (LABELS[goal] || goal) : "All" }, total: all.length, rows, gapAfter, movedUp });
 }));
 
 module.exports = router;

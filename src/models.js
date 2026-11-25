@@ -101,6 +101,7 @@ const Conversation = model("Conversation", new Schema({
   userId: { type: ObjectId, ref: "User", index: true },
   title: String,
   messages: [{ role: String, content: String, at: { type: Date, default: Date.now } }],
+  materialIds: [{ type: ObjectId, ref: "Material" }],     // files the learner attached to this chat
 }, { timestamps: true }));
 
 const Room = model("Room", new Schema({
@@ -240,6 +241,7 @@ const quotaSchema = new Schema({
   quiz: { type: Number, default: 0 },
   chat: { type: Number, default: 0 },
   search: { type: Number, default: 0 },
+  upload: { type: Number, default: 0 },          // files and scans read (was missing, so this limit never counted)
   createdAt: { type: Date, default: Date.now, expires: 3 * 86400 },   // old days are removed automatically
 });
 quotaSchema.index({ userId: 1, day: 1 }, { unique: true });
@@ -252,6 +254,7 @@ const Material = model("Material", new Schema({
   name: String, mime: String, size: Number,
   storage: String, storageKey: String,
   pages: Number, chars: Number,
+  topics: [String], summary: String,          // found by the AI when the file is read
   createdAt: { type: Date, default: Date.now, expires: NINETY_DAYS },
 }));
 const Chunk = model("Chunk", new Schema({

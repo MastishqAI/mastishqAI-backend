@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const { Practice, StageAttempt, Mistake, UserStats, User, Notification, Feedback } = require("../models");
 const { auth, wrap } = require("../middleware");
 const { generateQuestions, explainSteps, askAboutQuestion } = require("../lib/ai");
-const { awardXp } = require("../lib/xp");
+const { awardXp, levelInfo } = require("../lib/xp");
 const { consume, refund, limitMessage } = require("../lib/usage");
 
 // 429 helper: take one unit of today's limit or answer the request with a friendly message
@@ -235,12 +235,46 @@ router.post("/attempts/:attemptId/finish", wrap(async (req, res) => {
       score: a.score, maxScore: a.maxScore, passMark: a.passMark, cleared: a.cleared,
       marksToGo: now.marksToGo, marksLostTotal: now.marksLost, marksLost, mistakeTypes,
       mistakes: wrong.length, nextStage: cfg.next, nextStageLabel: cfg.next ? STAGES[cfg.next].label : null,
-      earned: a.earned, badge: a.badge,
+      earned: a.earned, badge: a.badge, practiceId: a.practiceId,
       stages: p?.stages,
       compare: prev ? {
         score: [prev.score, a.score], accuracy: [prevStats.accuracy, now.accuracy], avgTime: [prevStats.avgTimeSec, now.avgTimeSec],
       } : null,
     },
+  });
+}));
+
+// "Topic cleared" screen: the best result per stage, marks lost, rewards. Only meaningful once all three stages are cleared.
+router.get("/:id/summary", wrap(async (req, res) => {
+  const p = await Practice.findOne({ _id: req.params.id, userId: req.user.id });
+  if (!p) return res.status(404).json({ success: false, message: "Practice not found" });
+  const done = await StageAttempt.find({ practiceId: p._id, status: "submitted", stage: { $in: ["easy", "medium", "hard"] } });
+  const pickBest = (stage) => done.filter((x) => x.stage === stage).sort((x, y) => (Number(y.cleared) - Number(x.cleared)) || (y.score / (y.maxScore || 1)) - (x.score / (x.maxScore || 1)))[0];
+  const stages = ["easy", "medium", "hard"].map((k) => {
+    const b = pickBest(k);
+    return b && { stage: k, label: STAGES[k].label, cleared: !!b.cleared, score: b.score, max: b.maxScore, pct: Math.round((b.score / (b.maxScore || 1)) * 100), timeSec: b.timeSec || 0, attempt: b };
+  });
+  if (stages.some((x) => !x || !x.cleared)) return res.status(409).json({ success: false, message: "Clear all three stages first." });
+  const score = stages.reduce((n, x) => n + x.score, 0), max = stages.reduce((n, x) => n + x.max, 0);
+  const lostMap = {};
+  stages.forEach((x) => marksLostBySubtopic(x.attempt.questions, x.attempt.pointsEach, p.topic).forEach((m) => { lostMap[m.topic] = (lostMap[m.topic] || 0) + m.lost; }));
+  const lost = Object.entries(lostMap).map(([topic, n]) => ({ topic, lost: n })).sort((a, b) => b.lost - a.lost);
+  const worst = stages.reduce((m, x) => (!m || x.max - x.score > m.max - m.score ? x : m), null);
+  const stats = await UserStats.findOne({ userId: req.user.id }).lean();
+  const { badges } = await syncBadges(req.user.id);
+  const nextBadge = badges.find((b) => !b.met) || null;
+  const info = levelInfo(stats?.totalXp || 0);
+  res.json({
+    success: true, topic: p.topic, score, max, lostTotal: max - score, worstStage: worst?.label,
+    stages: stages.map(({ attempt, ...x }) => x),
+    pointsEarned: done.reduce((n, x) => n + (x.earned || 0), 0), totalPoints: stats?.totalXp || 0,
+    nextBadge: nextBadge && { name: nextBadge.name, hint: nextBadge.hint },
+    earnedBadge: badges.filter((b) => b.met).length ? badges.filter((b) => b.met).slice(-1)[0].key : null,
+    streak: stats?.currentStreak || 0,
+    level: { n: info.level, next: info.next, pct: info.next ? Math.round(((stats?.totalXp || 0) / info.next) * 100) : 100 },
+    lost: lost.slice(0, 3), lostOther: lost.slice(3).reduce((n, x) => n + x.lost, 0),
+    mistakes: stages.reduce((n, x) => n + x.attempt.questions.filter((q) => q.correct !== true).length, 0),
+    reviewAttemptId: stages[2].attempt._id,
   });
 }));
 
