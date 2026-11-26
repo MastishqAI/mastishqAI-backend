@@ -14,4 +14,4 @@ async function rewardReferral(userId) {
   return true;
 }
 
-module.exports = { rewardReferral, BONUS };
+module.exports = { rewardReferral, BONUS, MAX_REWARDED };

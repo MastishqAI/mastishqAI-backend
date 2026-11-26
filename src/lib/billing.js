@@ -2,7 +2,8 @@
 const crypto = require("crypto");
 
 const PLAN = {
-  amountPaise: Number(process.env.PRO_PRICE_PAISE) || 4900,   // Rs 49
+  amountPaise: Number(process.env.PRO_PRICE_PAISE) || 49900,   // Rs 499
+  listPricePaise: Number(process.env.PRO_LIST_PRICE_PAISE) || 99900,   // Rs 999, shown struck out (display only)
   days: Number(process.env.PRO_DAYS) || 30,
   currency: "INR",
 };

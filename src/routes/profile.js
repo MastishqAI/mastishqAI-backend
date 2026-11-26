@@ -7,7 +7,7 @@ const { cleanProfile, planInfo, newReferralCode, scrub } = require("../lib/profi
 const { lookupPincode } = require("../lib/pincode");
 const { sniff } = require("../lib/material");
 const { LIMITS, PRO_MULT } = require("../lib/usage");
-const { BONUS } = require("../lib/referral");
+const { BONUS, MAX_REWARDED } = require("../lib/referral");
 const { PLAN } = require("../lib/billing");
 const storage = require("../lib/storage");
 const { clearCookie } = require("../lib/session");
@@ -85,6 +85,22 @@ router.patch("/goals", wrap(async (req, res) => {
   const goalText = String(req.body.goalText || "").trim().slice(0, 300);
   const user = await User.findByIdAndUpdate(req.user.id, { $set: { goalName, goalText, subjects } }, { new: true });
   res.json({ success: true, profile: await view(user) });
+}));
+
+// Friends who joined with this learner's invite link (first name + last initial only, like the leaderboard)
+router.get("/referrals", wrap(async (req, res) => {
+  const user = await User.findById(req.user.id).select("referralCode referralRewardsGiven referredBy referralRewarded bonusChats");
+  if (!user) return res.status(404).json({ success: false, message: "Account not found" });
+  const friends = await User.find({ referredBy: user._id }).select("name picture referralRewarded createdAt").sort("createdAt").limit(200).lean();
+  let paid = 0;   // the invite reward stops after MAX_REWARDED friends, so only the earliest ones pay out
+  const rows = friends.map((f) => {
+    const w = String(f.name || "").trim().split(/\s+/).filter(Boolean);
+    const name = w.length ? `${w[0][0].toUpperCase()}${w[0].slice(1).toLowerCase()}${w.length > 1 ? ` ${w[w.length - 1][0].toUpperCase()}.` : ""}` : "Learner";
+    const rewarded = !!f.referralRewarded && paid++ < MAX_REWARDED;
+    return { name, picture: f.picture || null, rewarded, reward: rewarded ? BONUS : 0, date: f.createdAt };
+  }).reverse();
+  const earned = (user.referralRewardsGiven || 0) * BONUS + (user.referredBy && user.referralRewarded ? BONUS : 0);
+  res.json({ success: true, code: await referralCode(user), reward: BONUS, earned, balance: user.bonusChats || 0, referrals: rows });
 }));
 
 // "Download my data"

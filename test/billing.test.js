@@ -36,7 +36,8 @@ test("webhook signature is checked over the raw body", () => {
   assert.equal(verifyWebhook("", body, sig), false);
 });
 
-test("default price is Rs 49 for 30 days", () => {
-  assert.equal(PLAN.amountPaise, 4900);
+test("default price is Rs 499 for 30 days (Rs 999 list price)", () => {
+  assert.equal(PLAN.amountPaise, 49900);
+  assert.equal(PLAN.listPricePaise, 99900);
   assert.equal(PLAN.days, 30);
 });

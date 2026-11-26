@@ -33,7 +33,7 @@ async function creditOrder(orderId, paymentId) {
 }
 
 // what the upgrade card needs; the key ID is public, the secret never leaves the server
-router.get("/config", (_req, res) => res.json({ success: true, enabled: configured(), keyId: configured() ? keyId() : null, amount: PLAN.amountPaise / 100, currency: PLAN.currency, days: PLAN.days }));
+router.get("/config", (_req, res) => res.json({ success: true, enabled: configured(), keyId: configured() ? keyId() : null, amount: PLAN.amountPaise / 100, listAmount: PLAN.listPricePaise / 100, currency: PLAN.currency, days: PLAN.days }));
 
 router.get("/status", auth, wrap(async (req, res) => {
   const u = await User.findById(req.user.id).select("plan planExpiresAt").lean();
